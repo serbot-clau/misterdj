@@ -319,7 +319,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 
 <script>
 const KEY="mdjctrl_v10";
-const API="https://script.google.com/macros/s/AKfycbwdaLmacPQoH1tTrHy3ybDL7o-_UAVJMPMz8vOwVEQqic6l9_-MOj3mWIxbW4L21U3E/exec";
+const API="https://script.google.com/macros/s/AKfycbyQ_qwyRYPGGBypY9VE_onyCmrp2ElXrzXNQWUMtsp1cVpGbSy5S_ONHycAtbTjvPje/exec";
 let S={services:[],djs:["Sergio","Miguel","Clemente","Guillermo","David","Nixon"],vm:null,sel:null};
 let editId=null;
 let syncing=false;
@@ -560,21 +560,20 @@ async function saveService(){
     pago:document.getElementById("fPago").value,
     djs:getSelDjs()
   };
-  // Actualizar estado local inmediatamente
+  // Guardar en local inmediatamente
   if(editId){const i=S.services.findIndex(x=>x.id===editId);if(i>=0)S.services[i]=svc;}
   else S.services.push(svc);
   S.sel=fecha;S.vm=mk(fecha);
   closeForm();render();renderSheetBody();
-  // Subir a Sheets y confirmar
-  showSync("☁️ Guardando...");
-  const r = await apiCall("save", {svc});
+  // Subir a Sheets y confirmar con re-sync
+  showSync("☁️ Guardando en la nube...");
+  const r=await apiCall("save",{svc});
   if(!r.ok){
-    alert("⚠️ Error al guardar en la nube. El dato está guardado localmente pero puede perderse al sincronizar.");
+    showSync("");
+    alert("⚠️ Error al guardar en la nube: "+r.error);
   } else {
-    // Verificar sincronizando de vuelta
     await syncFromCloud();
   }
-  showSync("");
 }
 
 async function delSvc(id){
@@ -582,13 +581,13 @@ async function delSvc(id){
   S.services=S.services.filter(s=>s.id!==id);
   render();renderSheetBody();
   showSync("☁️ Borrando...");
-  const r = await apiCall("delete", {id});
+  const r=await apiCall("delete",{id});
   if(!r.ok){
+    showSync("");
     alert("⚠️ Error al borrar en la nube.");
   } else {
     await syncFromCloud();
   }
-  showSync("");
 }
 
 function updateCalc(){
@@ -651,61 +650,35 @@ function renderInformes(tab){
 function renderInfDj(){
   const box=document.getElementById("inf-dj");
   if(!box)return;
-  const fmtDate=d=>{if(!d)return"—";const[y,m,dd]=d.split("-");return`${dd}/${m}/${y}`;};
+  // Acumulado total de todos los servicios por DJ
   const map={};
-  S.djs.forEach(d=>{map[d]={svcs:0,gas:0,pagado:0,pendiente:0,svcsPend:[]};});
+  S.djs.forEach(d=>{map[d]={svcs:0,gas:0,pagado:0,pendiente:0};});
   S.services.forEach(s=>{
     const n=(s.djs||[]).length;
     const gpp=n>0?Number(s.gas||0)/n:0;
     const pagado=s.pago==="pagado";
     (s.djs||[]).forEach(d=>{
-      if(!map[d])map[d]={svcs:0,gas:0,pagado:0,pendiente:0,svcsPend:[]};
+      if(!map[d])map[d]={svcs:0,gas:0,pagado:0,pendiente:0};
       map[d].svcs++;
       map[d].gas+=gpp;
       if(pagado)map[d].pagado+=gpp;
-      else{map[d].pendiente+=gpp;map[d].svcsPend.push({...s,_gpp:gpp});}
+      else map[d].pendiente+=gpp;
     });
   });
-  const totalPend=Object.values(map).reduce((a,v)=>a+v.pendiente,0);
   const totalGas=Object.values(map).reduce((a,v)=>a+v.gas,0);
   box.innerHTML=`
-    <div class="inf-total-bar" style="margin-bottom:6px;">
-      <span>Total acumulado DJs</span>
+    <div class="inf-total-bar">
+      <span>Total pagado a DJs</span>
       <span style="color:var(--red);">${eur(totalGas)}</span>
     </div>
-    <div class="inf-total-bar" style="background:var(--abg);border-color:var(--abd);">
-      <span style="color:var(--amber);">⏳ Pendiente de pagar</span>
-      <span style="color:var(--amber);">${eur(totalPend)}</span>
-    </div>
     ${S.djs.map(d=>{
-      const v=map[d]||{svcs:0,gas:0,pagado:0,pendiente:0,svcsPend:[]};
+      const v=map[d]||{svcs:0,gas:0,pagado:0,pendiente:0};
       if(!v.svcs)return`<div class="inf-card"><div class="inf-card-top"><div class="inf-card-name">${escH(d)}</div><div class="inf-card-total" style="color:var(--t3);">Sin servicios</div></div></div>`;
-      const pendList=v.svcsPend.sort((a,b)=>a.date.localeCompare(b.date));
       return`<div class="inf-card">
-        <div class="inf-card-top">
-          <div class="inf-card-name">${escH(d)}</div>
-          <div style="text-align:right;">
-            <div style="font-size:11px;color:var(--t3);margin-bottom:2px;">${v.svcs} servicios</div>
-            <div class="inf-card-total">${eur(v.gas)}</div>
-          </div>
-        </div>
+        <div class="inf-card-top"><div class="inf-card-name">${escH(d)}</div><div class="inf-card-total">${eur(v.gas)}</div></div>
+        <div class="inf-row"><span class="inf-row-left">Servicios</span><span class="inf-row-right">${v.svcs}</span></div>
         <div class="inf-row"><span class="inf-row-left">✓ Pagado</span><span class="inf-row-right pos">${eur(v.pagado)}</span></div>
-        <div class="inf-row" style="margin-bottom:${pendList.length?'8px':'0'};">
-          <span class="inf-row-left">⏳ Pendiente</span>
-          <span class="inf-row-right neg">${eur(v.pendiente)}</span>
-        </div>
-        ${pendList.length?`
-          <div style="background:var(--abg);border-radius:6px;padding:8px;margin-top:4px;">
-            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--amber);margin-bottom:6px;">Servicios sin pagar</div>
-            ${pendList.map(s=>`
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--abd);font-size:12px;">
-                <div>
-                  <div style="font-weight:500;">${escH(s.lugar||"Sin nombre")}</div>
-                  <div style="color:var(--t2);font-size:11px;">${fmtDate(s.date)}${s.ini?" · "+s.ini:""} · ${escH(s.tipo||"")}</div>
-                </div>
-                <div style="font-family:'DM Mono',monospace;font-weight:600;color:var(--amber);white-space:nowrap;margin-left:8px;">${eur(s._gpp)}</div>
-              </div>`).join("")}
-          </div>`:""}
+        <div class="inf-row"><span class="inf-row-left">⏳ Pendiente pago</span><span class="inf-row-right neg">${eur(v.pendiente)}</span></div>
       </div>`;
     }).join("")}
   `;
@@ -775,140 +748,32 @@ function renderInfEventosDj(){
   const sel=document.getElementById("infDjSel");
   if(!sel)return;
   const dj=sel.value;
-  const svcs=S.services.filter(s=>(s.djs||[]).includes(dj)).sort((a,b)=>a.date.localeCompare(b.date));
+  const svcs=S.services.filter(s=>(s.djs||[]).includes(dj)).sort((a,b)=>b.date.localeCompare(a.date));
+  const total=svcs.reduce((a,s)=>a+Number(s.gas||0)/(s.djs||[]).length||0,0);
+  const fmtDate=d=>{if(!d)return"—";const[y,m,dd]=d.split("-");return`${dd}/${m}/${y}`;};
   const box=document.getElementById("infDjEventos");
   if(!svcs.length){box.innerHTML=`<div class="inf-card"><div class="inf-empty">Sin eventos para este DJ.</div></div>`;return;}
-
-  const fmtDate=d=>{if(!d)return"—";const[y,m,dd]=d.split("-");return`${dd}/${m}/${y}`;};
-  const fmtDay=d=>{if(!d)return"";const dt=new Date(d+"T00:00:00");return dt.toLocaleDateString("es-ES",{weekday:"short"}).toUpperCase();};
-  const total=svcs.reduce((a,s)=>a+Number(s.gas||0)/((s.djs||[]).length||1),0);
-  const totalH=svcs.filter(s=>s.ini&&s.fin).reduce((a,s)=>{
-    const [h1,m1]=s.ini.split(":").map(Number);
-    const [h2,m2]=s.fin.split(":").map(Number);
-    let mins=(h2*60+m2)-(h1*60+m1);
-    if(mins<0)mins+=24*60;
-    return a+mins;
-  },0);
-  const horas=Math.floor(totalH/60);
-  const mins=totalH%60;
-
-  // Agrupar por mes
-  const porMes={};
-  svcs.forEach(s=>{
-    const mk2=s.date?s.date.slice(0,7):"sin-fecha";
-    if(!porMes[mk2])porMes[mk2]=[];
-    porMes[mk2].push(s);
-  });
-
   box.innerHTML=`
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
-      <div class="inf-card" style="padding:10px;text-align:center;">
-        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t3);margin-bottom:4px;">Servicios</div>
-        <div style="font-size:22px;font-weight:600;">${svcs.length}</div>
-      </div>
-      <div class="inf-card" style="padding:10px;text-align:center;">
-        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t3);margin-bottom:4px;">Horas</div>
-        <div style="font-size:22px;font-weight:600;">${horas}h${mins?""+mins+"m":""}</div>
-      </div>
-      <div class="inf-card" style="padding:10px;text-align:center;">
-        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t3);margin-bottom:4px;">Cobrado</div>
-        <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:var(--green);">${eur(total)}</div>
-      </div>
+    <div class="inf-total-bar">
+      <span>${svcs.length} eventos · Total cobrado</span>
+      <span>${eur(total)}</span>
     </div>
-    ${Object.entries(porMes).sort().map(([mk2,msvcs])=>{
-      const [y,m]=mk2.split("-");
-      const mesLabel=mk2==="sin-fecha"?"Sin fecha":new Date(+y,+m-1,1).toLocaleDateString("es-ES",{month:"long",year:"numeric"});
-      const mTotal=msvcs.reduce((a,s)=>a+Number(s.gas||0)/((s.djs||[]).length||1),0);
-      return`<div class="inf-card" style="margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">
-          <div style="font-size:14px;font-weight:600;text-transform:capitalize;">${mesLabel}</div>
-          <div style="font-size:12px;font-family:'DM Mono',monospace;font-weight:500;color:var(--green);">${eur(mTotal)}</div>
-        </div>
-        ${msvcs.map(s=>{
-          const n=(s.djs||[]).length;
-          const cobrado=n>0?Number(s.gas||0)/n:0;
-          const pag=s.pago==="pagado";
-          const horario=s.ini&&s.fin?`${s.ini} – ${s.fin}`:s.ini?`${s.ini}`:"Sin horario";
-          return`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
-            <div style="flex:1;">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
-                <span style="font-size:10px;font-weight:700;color:var(--t3);background:var(--s2);padding:1px 5px;border-radius:4px;">${fmtDay(s.date)}</span>
-                <span style="font-size:13px;font-weight:500;">${fmtDate(s.date)}</span>
-              </div>
-              <div style="font-size:13px;font-weight:600;">${escH(s.lugar||"Sin nombre")}</div>
-              <div style="font-size:11px;color:var(--t2);margin-top:2px;">
-                ⏱ ${horario} · ${escH(s.tipo||"")}
-              </div>
-            </div>
-            <div style="text-align:right;margin-left:10px;flex-shrink:0;">
-              <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:600;">${eur(cobrado)}</div>
-              <div style="font-size:10px;font-weight:600;color:${pag?"var(--green)":"var(--amber)"};">${pag?"✓ Pagado":"⏳ Pendiente"}</div>
-            </div>
-          </div>`;
-        }).join("")}
-      </div>`;
-    }).join("")}
-    <button onclick="compartirResumen('${escH(dj)}')" style="width:100%;padding:14px;background:#25D366;color:#fff;border:none;border-radius:var(--rsm);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;display:flex;align-items:center;justify-content:center;gap:8px;">
-      <span style="font-size:18px;">📤</span> Enviar resumen por WhatsApp
-    </button>
-  `;
-}
-
-function compartirResumen(dj){
-  const svcs=S.services.filter(s=>(s.djs||[]).includes(dj)).sort((a,b)=>a.date.localeCompare(b.date));
-  const fmtDate=d=>{if(!d)return"—";const[y,m,dd]=d.split("-");return`${dd}/${m}/${y}`;};
-  const fmtDay=d=>{if(!d)return"";const dt=new Date(d+"T00:00:00");return dt.toLocaleDateString("es-ES",{weekday:"long"});};
-  const total=svcs.reduce((a,s)=>a+Number(s.gas||0)/((s.djs||[]).length||1),0);
-  const pend=svcs.filter(s=>s.pago!=="pagado").reduce((a,s)=>a+Number(s.gas||0)/((s.djs||[]).length||1),0);
-
-  let msg=`Hola ${dj} 👋\n\nTe mando el resumen de los servicios que has realizado con MisterDJ:\n\n`;
-  
-  // Agrupar por mes
-  const porMes={};
-  svcs.forEach(s=>{const mk2=s.date?s.date.slice(0,7):"sin-fecha";if(!porMes[mk2])porMes[mk2]=[];porMes[mk2].push(s);});
-  
-  Object.entries(porMes).sort().forEach(([mk2,msvcs])=>{
-    const[y,m]=mk2.split("-");
-    const mesLabel=mk2==="sin-fecha"?"Sin fecha":new Date(+y,+m-1,1).toLocaleDateString("es-ES",{month:"long",year:"numeric"});
-    msg+=`📅 *${mesLabel.toUpperCase()}*\n`;
-    msvcs.forEach(s=>{
-      const n=(s.djs||[]).length;
-      const cobrado=n>0?Number(s.gas||0)/n:0;
-      const horario=s.ini&&s.fin?`${s.ini}–${s.fin}`:s.ini||"";
-      const pag=s.pago==="pagado";
-      msg+=`• ${fmtDay(s.date)} ${fmtDate(s.date)}`;
-      if(horario)msg+=` (${horario})`;
-      msg+=`\n  ${s.lugar||"Sin nombre"} · ${s.tipo||""}`;
-      msg+=`\n  ${cobrado>0?eur(cobrado).replace(" ",""):"Sin importe"} · ${pag?"✅ Pagado":"⏳ Pendiente"}\n`;
-    });
-    msg+="\n";
-  });
-
-  msg+=`─────────────────\n`;
-  msg+=`Total servicios: ${svcs.length}\n`;
-  msg+=`Total cobrado: ${eur(total)}\n`;
-  if(pend>0)msg+=`⏳ Pendiente de pago: *${eur(pend)}*\n`;
-  else msg+=`✅ Todo pagado\n`;
-  msg+=`\nPor favor confírmame que todo es correcto. ¡Gracias!`;
-
-  // Mostrar modal con el texto y botón de WhatsApp
-  const modal=document.createElement("div");
-  modal.style.cssText="position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;";
-  modal.innerHTML=`
-    <div style="background:#fff;border-radius:18px 18px 0 0;padding:20px;width:100%;max-height:80vh;display:flex;flex-direction:column;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <h3 style="font-size:16px;font-weight:600;">Resumen para ${escH(dj)}</h3>
-        <button onclick="this.closest('div[style]').parentElement.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--t2);">✕</button>
-      </div>
-      <textarea readonly style="flex:1;min-height:200px;padding:12px;border:1px solid var(--border);border-radius:var(--rsm);font-family:inherit;font-size:12px;line-height:1.6;resize:none;background:var(--bg);overflow-y:auto;">${msg}</textarea>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button onclick="navigator.clipboard.writeText(this.closest('div[style]').querySelector('textarea').value).then(()=>alert('Copiado ✓'))" style="flex:1;padding:12px;border:1px solid var(--border);border-radius:var(--rsm);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;background:none;">📋 Copiar</button>
-        <a href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" style="flex:1;padding:12px;background:#25D366;color:#fff;border:none;border-radius:var(--rsm);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:6px;">💬 WhatsApp</a>
-      </div>
+    <div class="inf-card">
+      ${svcs.map(s=>{
+        const n=(s.djs||[]).length;
+        const cobrado=n>0?Number(s.gas||0)/n:0;
+        const pag=s.pago==="pagado";
+        return`<div class="inf-event-row">
+          <div class="inf-event-name">${escH(s.lugar||"Sin nombre")}</div>
+          <div class="inf-event-meta">
+            ${fmtDate(s.date)}${s.ini?" · "+s.ini:""} · ${escH(s.tipo||"")}
+            · <span style="color:${pag?"var(--green)":"var(--amber)"};">${pag?"Pagado":"Pendiente"}</span>
+            · <strong>${eur(cobrado)}</strong>
+          </div>
+        </div>`;
+      }).join("")}
     </div>
   `;
-  document.body.appendChild(modal);
-  modal.addEventListener("click",e=>{if(e.target===modal)modal.remove();});
 }
 
 function renderDjCards(){
@@ -945,8 +810,12 @@ let _sy=0;
 document.getElementById("daysheet").addEventListener("touchstart",e=>{_sy=e.touches[0].clientY;},{passive:true});
 document.getElementById("daysheet").addEventListener("touchend",e=>{if(e.changedTouches[0].clientY-_sy>60)closeSheet();},{passive:true});
 
-loadLocal();render();
-syncFromCloud();
+async function init(){
+  loadLocal();
+  render();
+  await syncFromCloud();
+}
+init();
 </script>
 </body>
 </html>
