@@ -319,7 +319,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 
 <script>
 const KEY="mdjctrl_v10";
-const API="https://script.google.com/macros/s/AKfycbyQ_qwyRYPGGBypY9VE_onyCmrp2ElXrzXNQWUMtsp1cVpGbSy5S_ONHycAtbTjvPje/exec";
+const API="https://script.google.com/macros/s/AKfycbwdaLmacPQoH1tTrHy3ybDL7o-_UAVJMPMz8vOwVEQqic6l9_-MOj3mWIxbW4L21U3E/exec";
 let S={services:[],djs:["Sergio","Miguel","Clemente","Guillermo","David","Nixon"],vm:null,sel:null};
 let editId=null;
 let syncing=false;
@@ -362,21 +362,33 @@ function loadLocal(){
   S.vm=mk(new Date());S.sel=toDay();
 }
 
+// Merge: combina datos locales y de la nube sin perder ninguno
+function mergeServices(local, cloud){
+  const map={};
+  // Primero los de la nube
+  cloud.forEach(s=>{if(s.id)map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
+  // Los locales que no están en la nube (recién guardados) los conservamos
+  local.forEach(s=>{if(s.id&&!map[s.id])map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
+  return Object.values(map);
+}
+
 async function syncFromCloud(){
-  showSync("☁️ Sincronizando datos...");
-  const [r1, r2] = await Promise.all([
-    apiCall("getAll"),
-    apiCall("getDjs")
-  ]);
-  if(r1.ok && r1.data){
-    S.services = r1.data.map(s=>({...s, djs: Array.isArray(s.djs)?s.djs:[]}));
+  showSync("☁️ Sincronizando...");
+  try{
+    const [r1,r2]=await Promise.all([apiCall("getAll"),apiCall("getDjs")]);
+    if(r1.ok&&r1.data){
+      S.services=mergeServices(S.services, r1.data);
+    }
+    if(r2.ok&&r2.djs&&r2.djs.length) S.djs=r2.djs;
+    saveLocal();
+    localStorage.setItem(KEY+"_lastsync", Date.now());
+    showSync("✓ Sincronizado");
+    setTimeout(()=>showSync(""),2000);
+    render();
+  }catch(e){
+    showSync("⚠️ Error de conexión");
+    setTimeout(()=>showSync(""),2000);
   }
-  if(r2.ok && r2.djs && r2.djs.length){
-    S.djs = r2.djs;
-  }
-  saveLocal();
-  showSync("");
-  render();
 }
 
 async function pushService(svc){
@@ -560,19 +572,25 @@ async function saveService(){
     pago:document.getElementById("fPago").value,
     djs:getSelDjs()
   };
-  // Guardar en local inmediatamente
+  // 1. Guardar en local inmediatamente
   if(editId){const i=S.services.findIndex(x=>x.id===editId);if(i>=0)S.services[i]=svc;}
   else S.services.push(svc);
   S.sel=fecha;S.vm=mk(fecha);
   closeForm();render();renderSheetBody();
-  // Subir a Sheets y confirmar con re-sync
-  showSync("☁️ Guardando en la nube...");
-  const r=await apiCall("save",{svc});
-  if(!r.ok){
-    showSync("");
-    alert("⚠️ Error al guardar en la nube: "+r.error);
+  // 2. Subir a Sheets con hasta 3 reintentos — SIN sync posterior
+  showSync("☁️ Guardando...");
+  let ok=false;
+  for(let i=0;i<3;i++){
+    const r=await apiCall("save",{svc});
+    if(r.ok){ok=true;break;}
+    if(i<2) await new Promise(res=>setTimeout(res,2000));
+  }
+  if(!ok){
+    showSync("⚠️ Sin conexión — guardado solo en este dispositivo");
+    setTimeout(()=>showSync(""),4000);
   } else {
-    await syncFromCloud();
+    showSync("✓ Guardado");
+    setTimeout(()=>showSync(""),2000);
   }
 }
 
@@ -581,13 +599,14 @@ async function delSvc(id){
   S.services=S.services.filter(s=>s.id!==id);
   render();renderSheetBody();
   showSync("☁️ Borrando...");
-  const r=await apiCall("delete",{id});
-  if(!r.ok){
-    showSync("");
-    alert("⚠️ Error al borrar en la nube.");
-  } else {
-    await syncFromCloud();
+  let ok=false;
+  for(let i=0;i<3;i++){
+    const r=await apiCall("delete",{id});
+    if(r.ok){ok=true;break;}
+    await new Promise(res=>setTimeout(res,2000));
   }
+  showSync(ok?"✓ Borrado":"⚠️ Error al borrar en nube");
+  setTimeout(async()=>{showSync("");await syncFromCloud();},3000);
 }
 
 function updateCalc(){
@@ -813,7 +832,13 @@ document.getElementById("daysheet").addEventListener("touchend",e=>{if(e.changed
 async function init(){
   loadLocal();
   render();
-  await syncFromCloud();
+  // Solo sincronizar si llevamos más de 5 minutos sin hacerlo
+  const lastSync=Number(localStorage.getItem(KEY+"_lastsync")||0);
+  const now=Date.now();
+  if(now-lastSync > 5*60*1000){
+    await syncFromCloud();
+    localStorage.setItem(KEY+"_lastsync", now);
+  }
 }
 init();
 </script>
