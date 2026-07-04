@@ -362,13 +362,13 @@ function loadLocal(){
   S.vm=mk(new Date());S.sel=toDay();
 }
 
-// Merge: combina datos locales y de la nube sin perder ninguno
+// Merge: la nube manda. Solo conservamos locales que no están en la nube aún.
 function mergeServices(local, cloud){
   const map={};
-  // Primero los de la nube
+  // Los locales que NO están en la nube (recién guardados, pendientes de subir)
+  local.forEach(s=>{if(s.id)map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
+  // La nube sobreescribe todo lo que ya está confirmado
   cloud.forEach(s=>{if(s.id)map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
-  // Los locales que no están en la nube (recién guardados) los conservamos
-  local.forEach(s=>{if(s.id&&!map[s.id])map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
   return Object.values(map);
 }
 
@@ -836,6 +836,6 @@ async function init(){
   // Esto evita que se sobreescriban datos recién guardados
 }
 init();
-</script>    
+</script>
 </body>
 </html>
