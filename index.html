@@ -603,10 +603,10 @@ async function delSvc(id){
   for(let i=0;i<3;i++){
     const r=await apiCall("delete",{id});
     if(r.ok){ok=true;break;}
-    await new Promise(res=>setTimeout(res,2000));
+    if(i<2) await new Promise(res=>setTimeout(res,2000));
   }
   showSync(ok?"✓ Borrado":"⚠️ Error al borrar en nube");
-  setTimeout(async()=>{showSync("");await syncFromCloud();},3000);
+  setTimeout(()=>showSync(""),2500);
 }
 
 function updateCalc(){
@@ -832,13 +832,8 @@ document.getElementById("daysheet").addEventListener("touchend",e=>{if(e.changed
 async function init(){
   loadLocal();
   render();
-  // Solo sincronizar si llevamos más de 5 minutos sin hacerlo
-  const lastSync=Number(localStorage.getItem(KEY+"_lastsync")||0);
-  const now=Date.now();
-  if(now-lastSync > 5*60*1000){
-    await syncFromCloud();
-    localStorage.setItem(KEY+"_lastsync", now);
-  }
+  // NO sync automático al arrancar — solo manual con botón ⟳
+  // Esto evita que se sobreescriban datos recién guardados
 }
 init();
 </script>
