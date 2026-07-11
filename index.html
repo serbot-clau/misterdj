@@ -193,7 +193,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <h1><span class="dot"></span>MisterDJ</h1>
+  <h1><span class="dot"></span>MisterDJ <span id="verBadge" style="font-size:9px;font-weight:500;color:var(--t3);vertical-align:middle;"></span></h1>
   <div class="mnav">
     <button onclick="changeMonth(-1)">&#8249;</button>
     <span id="monthLbl"></span>
@@ -318,21 +318,29 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 </div>
 
 <script>
-const KEY="mdjctrl_v10";
+const KEY="mdjctrl_v11";
+const APP_VERSION="v2026.07.11-1";
 const API="https://script.google.com/macros/s/AKfycbwI9ckWKcNriNzc6YRBa-agdG55WX38memAttrtFUdQhQTgyjz9YIuACPveHsJXzR-g/exec";
 let S={services:[],djs:["Sergio","Miguel","Clemente","Guillermo","David","Nixon"],vm:null,sel:null};
 let editId=null;
 let syncing=false;
 
-async function apiCall(action, extra={}) {
+{const vb=document.getElementById("verBadge");if(vb)vb.textContent=APP_VERSION;}
+
+async function apiCall(action, extra={}, timeoutMs=12000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(API, {
       method:"POST",
-      body: JSON.stringify({action, ...extra})
+      body: JSON.stringify({action, ...extra}),
+      signal: ctrl.signal
     });
+    clearTimeout(timer);
     return await res.json();
   } catch(e) {
-    return {ok:false, error:e.toString()};
+    clearTimeout(timer);
+    return {ok:false, error: e.name==="AbortError" ? "Tiempo de espera agotado" : e.toString()};
   }
 }
 
@@ -362,13 +370,21 @@ function loadLocal(){
   S.vm=mk(new Date());S.sel=toDay();
 }
 
-// Merge: la nube manda. Solo conservamos locales que no están en la nube aún.
+// Merge por ID: si un servicio existe en ambos lados, gana el que tenga
+// el timestamp "upd" más reciente. Si un lado no tiene "upd" (datos antiguos),
+// se le asume upd=0 para no perder por accidente lo que sí tiene timestamp.
 function mergeServices(local, cloud){
   const map={};
-  // Los locales que NO están en la nube (recién guardados, pendientes de subir)
   local.forEach(s=>{if(s.id)map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
-  // La nube sobreescribe todo lo que ya está confirmado
-  cloud.forEach(s=>{if(s.id)map[s.id]={...s,djs:Array.isArray(s.djs)?s.djs:[]};});
+  cloud.forEach(s=>{
+    if(!s.id)return;
+    const existing=map[s.id];
+    const cloudItem={...s,djs:Array.isArray(s.djs)?s.djs:[]};
+    if(!existing){map[s.id]=cloudItem;return;}
+    const localUpd=Number(existing.upd||0);
+    const cloudUpd=Number(cloudItem.upd||0);
+    map[s.id]=cloudUpd>=localUpd?cloudItem:existing;
+  });
   return Object.values(map);
 }
 
@@ -570,7 +586,8 @@ async function saveService(){
     gas:document.getElementById("fGas").value,
     cobro:document.getElementById("fCobro").value,
     pago:document.getElementById("fPago").value,
-    djs:getSelDjs()
+    djs:getSelDjs(),
+    upd:Date.now()
   };
   // 1. Guardar en local inmediatamente
   if(editId){const i=S.services.findIndex(x=>x.id===editId);if(i>=0)S.services[i]=svc;}
